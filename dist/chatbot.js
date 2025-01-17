@@ -360,7 +360,6 @@
 
         const custom_labels = { "ai-chat-bot-widget": "true" };
 
-
         fetch(`${openAIConfig.baseURL}/chat/completions`, {
             method: "POST",
             headers: {
@@ -384,6 +383,10 @@
                 function readStream() {
                     reader.read().then(({ done, value }) => {
                         if (done) {
+                            // Only add the assistant's message to history if it's not empty
+                            if (fullResponse.trim()) {
+                                conversationHistory.push({ role: "assistant", content: fullResponse });
+                            }
                             return;
                         }
                         const chunk = decoder.decode(value, { stream: true });
@@ -419,9 +422,6 @@
             .catch((error) => {
                 console.error("Fetch error:", error);
                 messageElement.innerHTML = "Error: Unable to connect to the server.";
-            })
-            .finally(() => {
-                conversationHistory.push({ role: "assistant", content: fullResponse });
             });
     }
 
