@@ -14,7 +14,9 @@
         fontFamily: "Arial, sans-serif",
         botAvatar: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>',
         placeholderText: "Type your message...",
-        sendButtonText: "Send"
+        sendButtonText: "Send",
+        plugins: [],
+        featureFlags: {}
     };
 
     // Merge default settings with user-provided settings
@@ -360,69 +362,80 @@
 
         const custom_labels = { "ai-chat-bot-widget": "true" };
 
+        // Prepare the request body
+        const requestBody = {
+            model: "pulze",
+            messages: conversationHistory,
+            stream: true
+        };
+
+        // Add plugins if specified
+        if (settings.plugins && settings.plugins.length > 0) {
+            requestBody.plugins = settings.plugins;
+        }
+
         fetch(`${openAIConfig.baseURL}/chat/completions`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${openAIConfig.apiKey}`,
                 "Pulze-Labels": JSON.stringify(custom_labels),
+                // Add feature flags if specified
+                ...(Object.keys(settings.featureFlags).length > 0 && {
+                    "Pulze-Feature-Flags": JSON.stringify(settings.featureFlags)
+                })
             },
-            body: JSON.stringify({
-                model: "pulze",
-                messages: conversationHistory,
-                stream: true,
-            }),
+            body: JSON.stringify(requestBody)
         })
-            .then((response) => {
-                if (!response.ok) {
-                    throw new Error("Network response was not ok");
-                }
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error("Network response was not ok");
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
 
-                function readStream() {
-                    reader.read().then(({ done, value }) => {
-                        if (done) {
-                            // Only add the assistant's message to history if it's not empty
-                            if (fullResponse.trim()) {
-                                conversationHistory.push({ role: "assistant", content: fullResponse });
-                            }
-                            return;
+            function readStream() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        if (fullResponse.trim()) {
+                            conversationHistory.push({ role: "assistant", content: fullResponse });
                         }
-                        const chunk = decoder.decode(value, { stream: true });
-                        const lines = chunk.split("\n");
-                        lines.forEach((line) => {
-                            if (line.startsWith("data: ")) {
-                                const data = line.slice(6);
-                                if (data === "[DONE]") {
-                                    return;
-                                }
-                                try {
-                                    const parsed = JSON.parse(data);
-                                    const content = parsed.choices[0].delta.content;
-                                    if (content) {
-                                        fullResponse += content;
-                                        messageElement.innerHTML = MarkdownRenderer(fullResponse);
-                                        chatMessages.scrollTop = chatMessages.scrollHeight;
-                                    }
-                                } catch (error) {
-                                    console.error("Error parsing streaming response:", error);
-                                }
+                        return;
+                    }
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split("\n");
+                    lines.forEach((line) => {
+                        if (line.startsWith("data: ")) {
+                            const data = line.slice(6);
+                            if (data === "[DONE]") {
+                                return;
                             }
-                        });
-                        readStream();
-                    }).catch((error) => {
-                        console.error("Error reading stream:", error);
-                        messageElement.innerHTML += "\nError: Unable to fetch the response.";
+                            try {
+                                const parsed = JSON.parse(data);
+                                const content = parsed.choices[0].delta.content;
+                                if (content) {
+                                    fullResponse += content;
+                                    messageElement.innerHTML = MarkdownRenderer(fullResponse);
+                                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                                }
+                            } catch (error) {
+                                console.error("Error parsing streaming response:", error);
+                            }
+                        }
                     });
-                }
+                    readStream();
+                }).catch((error) => {
+                    console.error("Error reading stream:", error);
+                    messageElement.innerHTML += "\nError: Unable to fetch the response.";
+                });
+            }
 
-                readStream();
-            })
-            .catch((error) => {
-                console.error("Fetch error:", error);
-                messageElement.innerHTML = "Error: Unable to connect to the server.";
-            });
+            readStream();
+        })
+        .catch((error) => {
+            console.error("Fetch error:", error);
+            messageElement.innerHTML = "Error: Unable to connect to the server.";
+        });
     }
 
     // Function to copy code to clipboard
